@@ -16,6 +16,25 @@ static bool is_json_file(const std::string& filePath) {
     return std::filesystem::path(filePath).extension() == ".json";
 }
 
+static void require_single_symbol(const std::string& symbol, const std::string& field_name) {
+    if (symbol.empty())
+        throw std::runtime_error(field_name + " cannot be empty");
+    if (symbol.size() != 1)
+        throw std::runtime_error(field_name + " must contain exactly one character: '" + symbol + "'");
+}
+
+static void require_unique_list(const std::vector<std::string>& values, const std::string& field_name) {
+    std::set<std::string> seen;
+
+    for (const std::string& value : values)
+    {
+        if (value.empty())
+            throw std::runtime_error(field_name + " cannot contain empty values");
+        if (!seen.insert(value).second)
+            throw std::runtime_error("Duplicate value '" + value + "' found in " + field_name);
+    }
+}
+
 nlohmann::json parseJsonFile(const std::string& filename) {
     std::ifstream file(filename.c_str());
     if (!file.is_open())
@@ -31,7 +50,6 @@ nlohmann::json parseJsonFile(const std::string& filename) {
 }
 void validate_machine(const Machine& m)
 {
-
     if (m.name.empty())
         throw std::runtime_error("Machine name is missing");
 
@@ -47,15 +65,19 @@ void validate_machine(const Machine& m)
     if (m.initial.empty())
         throw std::runtime_error("Initial state is missing");
 
+    require_unique_list(m.alphabet, "alphabet");
+    require_unique_list(m.states, "states");
+    require_unique_list(m.finals, "finals");
+    require_single_symbol(m.blank, "Blank symbol");
+
+    for (const std::string& symbol : m.alphabet)
+        require_single_symbol(symbol, "Alphabet symbol");
 
     if (std::find(m.alphabet.begin(), m.alphabet.end(), m.blank) == m.alphabet.end())
         throw std::runtime_error("Blank symbol not in alphabet");
 
-
-
     if (std::find(m.states.begin(), m.states.end(), m.initial) == m.states.end())
         throw std::runtime_error("Initial state not in states list");
-
 
     for (const auto& f : m.finals)
     {
@@ -66,27 +88,33 @@ void validate_machine(const Machine& m)
 
     for (const auto& [state, vec] : m.transitions)
     {
-        // state must exist
         if (std::find(m.states.begin(), m.states.end(), state) == m.states.end())
             throw std::runtime_error("Transition defined for invalid state: " + state);
 
+        if (vec.empty())
+            throw std::runtime_error("State '" + state + "' has an empty transition list");
+
+        std::set<std::string> seen_reads;
+
         for (const auto& t : vec)
         {
-            // read symbol must exist in alphabet
+            require_single_symbol(t.read, "Read symbol");
+            require_single_symbol(t.write, "Write symbol");
+
             if (std::find(m.alphabet.begin(), m.alphabet.end(), t.read) == m.alphabet.end())
-                throw std::runtime_error("Invalid read symbol in transition");
+                throw std::runtime_error("Invalid read symbol '" + t.read + "' in state '" + state + "'");
 
-            // write symbol must exist in alphabet
             if (std::find(m.alphabet.begin(), m.alphabet.end(), t.write) == m.alphabet.end())
-                throw std::runtime_error("Invalid write symbol in transition");
+                throw std::runtime_error("Invalid write symbol '" + t.write + "' in state '" + state + "'");
 
-            // next state must exist
+            if (!seen_reads.insert(t.read).second)
+                throw std::runtime_error("Duplicate transition for state '" + state + "' and read symbol '" + t.read + "'");
+
             if (std::find(m.states.begin(), m.states.end(), t.to_state) == m.states.end())
-                throw std::runtime_error("Invalid to_state in transition");
+                throw std::runtime_error("Invalid to_state '" + t.to_state + "' in state '" + state + "'");
 
-            // action must be valid
             if (t.action != "LEFT" && t.action != "RIGHT")
-                throw std::runtime_error("Invalid action in transition (must be LEFT or RIGHT)");
+                throw std::runtime_error("Invalid action '" + t.action + "' in state '" + state + "' (must be LEFT or RIGHT)");
         }
     }
 }
@@ -126,4 +154,3 @@ Machine parse_machine(const std::string& filename) {
     }
     return machine;
 }
-
